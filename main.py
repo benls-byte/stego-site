@@ -54,9 +54,48 @@ TAG_SIZE = 32
 PBKDF2_ITERATIONS = 150_000
 
 
+def _pbkdf2_hmac_fallback(
+    hash_name: str, password: bytes, salt: bytes, iterations: int, dklen: int = None
+) -> bytes:
+    """Pure-Python fallback for pbkdf2_hmac if hashlib lacks it."""
+    if hash_name.lower() != "sha256":
+        raise ValueError("Only sha256 is supported in fallback")
+    digest_size = 32
+    if dklen is None:
+        dklen = digest_size
+
+    def F(pwd, slt, itr, block_idx):
+        u = hmac.new(pwd, slt + block_idx.to_bytes(4, "big"), hashlib.sha256).digest()
+        res = bytearray(u)
+        for _ in range(2, itr + 1):
+            u = hmac.new(pwd, u, hashlib.sha256).digest()
+            for j in range(digest_size):
+                res[j] ^= u[j]
+        return bytes(res)
+
+    l = (dklen + digest_size - 1) // digest_size
+    derived = bytearray()
+    for i in range(1, l + 1):
+        derived.extend(F(password, salt, iterations, i))
+    return bytes(derived[:dklen])
+
+
 def derive_keys(passphrase: str, salt: bytes) -> tuple[bytes, bytes]:
     """Create separate encryption-stream and authentication keys."""
-    derived = hashlib.pbkdf2_hmac(
+    if hasattr(hashlib, "pbkdf2_hmac"):
+        try:
+            derived = hashlib.pbkdf2_hmac(
+                "sha256",
+                passphrase.encode("utf-8"),
+                salt,
+                PBKDF2_ITERATIONS,
+                dklen=64,
+            )
+            return derived[:32], derived[32:]
+        except Exception:
+            pass
+
+    derived = _pbkdf2_hmac_fallback(
         "sha256",
         passphrase.encode("utf-8"),
         salt,
@@ -278,7 +317,7 @@ def decode_image(image_bytes: bytes, passphrase: str) -> str:
 @route
 def index(state: State) -> Page:
     return Page(state, [
-        Header("Comp Sci Final Project - Steganography Tool"),
+        Header("🐶 Crypto Corgi - Steganography Tool"),
         Paragraph(
             "Hide secret messages inside images or reveal hidden text from "
             "image files. Choose what you want to do below."
@@ -433,4 +472,3 @@ def decode_result_page(state: State) -> Page:
 
 # Start the website. Drafter serves the routes above.
 start_server(State())
-
