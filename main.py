@@ -15,6 +15,7 @@ import hmac
 import secrets
 
 from drafter import *
+set_website_style("magick")
 
 
 # ---------------------------------------------------------------------------
